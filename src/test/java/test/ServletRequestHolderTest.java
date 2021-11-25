@@ -11,6 +11,7 @@ import org.example.ServletRequestHolderFilter;
 import org.example.ServletRequestHolderInitializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import servlet.ServletContainer;
@@ -61,6 +62,31 @@ public class ServletRequestHolderTest
         }
     }
 
+    public static class AsyncRunnableServlet extends HttpServlet
+    {
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+        {
+            AsyncContext asyncContext = req.startAsync();
+            asyncContext.start(() ->
+            {
+                try
+                {
+                    HttpServletRequest heldRequest = ServletRequestHolderFilter.getRequest();
+                    assertThat(heldRequest, equalTo(req));
+                }
+                catch (Throwable t)
+                {
+                    resp.setStatus(500);
+                }
+                finally
+                {
+                    asyncContext.complete();
+                }
+            });
+        }
+    }
+
     @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
     @ParameterizedTest
     public void testRequest(Class<? extends ServletContainer> containerClass) throws Exception
@@ -85,6 +111,20 @@ public class ServletRequestHolderTest
         _container.start();
 
         ContentResponse response = _client.GET("http://localhost:8080/async");
+        assertThat(response.getStatus(), equalTo(200));
+    }
+
+    @Disabled("Doesn't seem to be a way to do this within the Servlet API")
+    @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
+    @ParameterizedTest
+    public void testAsyncRunnable(Class<? extends ServletContainer> containerClass) throws Exception
+    {
+        _container = containerClass.getDeclaredConstructor().newInstance();
+        _container.addServletContainerInitializer(ServletRequestHolderInitializer.class);
+        _container.addServlet(AsyncRunnableServlet.class, "/asyncRunnable");
+        _container.start();
+
+        ContentResponse response = _client.GET("http://localhost:8080/asyncRunnable");
         assertThat(response.getStatus(), equalTo(200));
     }
 }
