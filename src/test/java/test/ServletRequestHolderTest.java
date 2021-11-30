@@ -1,6 +1,11 @@
 package test;
 
+import java.io.IOException;
 import javax.servlet.AsyncContext;
+import javax.servlet.ReadListener;
+import javax.servlet.ServletInputStream;
+import javax.servlet.ServletOutputStream;
+import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -40,6 +45,18 @@ public class ServletRequestHolderTest
         _client.stop();
         if (_container != null)
             _container.stop();
+    }
+
+    private static void sendError(HttpServletResponse response, Throwable t)
+    {
+        try
+        {
+            response.sendError(500, t.getMessage());
+        }
+        catch (IOException exception)
+        {
+            throw new RuntimeException(exception);
+        }
     }
 
     public static class TestServlet extends HttpServlet
@@ -87,6 +104,70 @@ public class ServletRequestHolderTest
         }
     }
 
+    public static class AsyncReadServlet extends HttpServlet
+    {
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException
+        {
+            AsyncContext asyncContext = req.startAsync();
+            ServletInputStream inputStream = req.getInputStream();
+            inputStream.setReadListener(new ReadListener()
+            {
+
+                @Override
+                public void onDataAvailable() throws IOException
+                {
+                    HttpServletRequest heldRequest = ServletRequestHolderFilter.getRequest();
+                    assertThat(heldRequest, equalTo(req));
+                    inputStream.close();
+                    asyncContext.complete();
+                }
+
+                @Override
+                public void onAllDataRead() throws IOException
+                {
+                    HttpServletRequest heldRequest = ServletRequestHolderFilter.getRequest();
+                    assertThat(heldRequest, equalTo(req));
+                    inputStream.close();
+                    asyncContext.complete();
+                }
+
+                @Override
+                public void onError(Throwable t)
+                {
+                    sendError(resp, t);
+                }
+            });
+        }
+    }
+
+    public static class AsyncWriteServlet extends HttpServlet
+    {
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException
+        {
+            AsyncContext asyncContext = req.startAsync();
+            ServletOutputStream outputStream = resp.getOutputStream();
+            outputStream.setWriteListener(new WriteListener()
+            {
+                @Override
+                public void onWritePossible() throws IOException
+                {
+                    HttpServletRequest heldRequest = ServletRequestHolderFilter.getRequest();
+                    assertThat(heldRequest, equalTo(req));
+                    outputStream.close();
+                    asyncContext.complete();
+                }
+
+                @Override
+                public void onError(Throwable t)
+                {
+                    sendError(resp, t);
+                }
+            });
+        }
+    }
+
     @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
     @ParameterizedTest
     public void testRequest(Class<? extends ServletContainer> containerClass) throws Exception
@@ -102,7 +183,7 @@ public class ServletRequestHolderTest
 
     @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
     @ParameterizedTest
-    public void testAsync(Class<? extends ServletContainer> containerClass) throws Exception
+    public void testAsyncDispatch(Class<? extends ServletContainer> containerClass) throws Exception
     {
         _container = containerClass.getDeclaredConstructor().newInstance();
         _container.addServletContainerInitializer(ServletRequestHolderInitializer.class);
@@ -114,7 +195,6 @@ public class ServletRequestHolderTest
         assertThat(response.getStatus(), equalTo(200));
     }
 
-    @Disabled("Doesn't seem to be a way to do this within the Servlet API")
     @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
     @ParameterizedTest
     public void testAsyncRunnable(Class<? extends ServletContainer> containerClass) throws Exception
@@ -125,6 +205,34 @@ public class ServletRequestHolderTest
         _container.start();
 
         ContentResponse response = _client.GET("http://localhost:8080/asyncRunnable");
+        assertThat(response.getStatus(), equalTo(200));
+    }
+
+    @Disabled("Need to implement the wrapped ReadListener")
+    @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
+    @ParameterizedTest
+    public void testAsyncRead(Class<? extends ServletContainer> containerClass) throws Exception
+    {
+        _container = containerClass.getDeclaredConstructor().newInstance();
+        _container.addServletContainerInitializer(ServletRequestHolderInitializer.class);
+        _container.addServlet(AsyncReadServlet.class, "/asyncRead");
+        _container.start();
+
+        ContentResponse response = _client.GET("http://localhost:8080/asyncRead");
+        assertThat(response.getStatus(), equalTo(200));
+    }
+
+    @Disabled("Need to implement the wrapped WriteListener")
+    @ValueSource(classes = {JettyContainer.class, TomcatContainer.class, UndertowContainer.class})
+    @ParameterizedTest
+    public void testAsyncWrite(Class<? extends ServletContainer> containerClass) throws Exception
+    {
+        _container = containerClass.getDeclaredConstructor().newInstance();
+        _container.addServletContainerInitializer(ServletRequestHolderInitializer.class);
+        _container.addServlet(AsyncWriteServlet.class, "/asyncWrite");
+        _container.start();
+
+        ContentResponse response = _client.GET("http://localhost:8080/asyncWrite");
         assertThat(response.getStatus(), equalTo(200));
     }
 }

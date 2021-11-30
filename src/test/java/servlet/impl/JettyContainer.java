@@ -49,6 +49,6 @@ public class JettyContainer implements ServletContainer
     @Override
     public void addServletContainerInitializer(Class<? extends ServletContainerInitializer> sciClass) throws Exception
     {
-        contextHandler.addServletContainerInitializer(sciClass.getDeclaredConstructor().newInstance());
+        contextHandler.addBean(new ServletContextHandler.Initializer(contextHandler, sciClass.getDeclaredConstructor().newInstance()));
     }
 }

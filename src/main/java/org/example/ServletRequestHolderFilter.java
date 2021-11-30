@@ -16,14 +16,23 @@ public class ServletRequestHolderFilter extends HttpFilter
         return REQUEST.get();
     }
 
+    static void setRequest(HttpServletRequest request)
+    {
+        REQUEST.set(request);
+    }
+
     @Override
     protected void doFilter(HttpServletRequest req, HttpServletResponse res, FilterChain chain) throws IOException, ServletException
     {
         HttpServletRequest oldValue = REQUEST.get();
         try
         {
-            REQUEST.set(req);
-            super.doFilter(req, res, chain);
+            // We wrap the request and response so we can intercept any async callbacks.
+            WrappedRequest wrappedRequest = new WrappedRequest(req);
+            WrappedResponse wrappedResponse = new WrappedResponse(res);
+
+            REQUEST.set(wrappedRequest);
+            super.doFilter(wrappedRequest, wrappedResponse, chain);
         }
         finally
         {
